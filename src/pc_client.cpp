@@ -4,6 +4,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <chrono>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -77,28 +79,41 @@ int main() {
 
         std::cout << "[pc] DISCOVER sent, waiting " << kTimeoutSec << "s..." << std::endl;
 
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(sock, &fds);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kTimeoutSec);
+        bool found_response = false;
 
-        timeval tv{};
-        tv.tv_sec = kTimeoutSec;
+        while (std::chrono::steady_clock::now() < deadline) {
+            const auto remaining = deadline - std::chrono::steady_clock::now();
+            timeval tv{};
+            tv.tv_sec = static_cast<time_t>(std::chrono::duration_cast<std::chrono::seconds>(remaining).count());
+            tv.tv_usec = static_cast<suseconds_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(remaining % std::chrono::seconds(1)).count());
 
-        const int sel = select(sock + 1, &fds, nullptr, nullptr, &tv);
-        if (sel <= 0) {
-            std::cout << "[pc] no response" << std::endl;
-            close(sock);
-            return 0;
-        }
+            fd_set fds;
+            FD_ZERO(&fds);
+            FD_SET(sock, &fds);
 
-        while (true) {
+            const int sel = select(sock + 1, &fds, nullptr, nullptr, &tv);
+            if (sel == 0) {
+                break;
+            }
+            if (sel < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                throw std::runtime_error("select failed");
+            }
+
             sockaddr_in from{};
             socklen_t from_len = sizeof(from);
             char buf[kMaxPacket];
-            const ssize_t n = recvfrom(sock, buf, sizeof(buf), MSG_DONTWAIT,
+            const ssize_t n = recvfrom(sock, buf, sizeof(buf), 0,
                                        reinterpret_cast<sockaddr*>(&from), &from_len);
             if (n <= 0) {
-                break;
+                if (errno == EINTR) {
+                    continue;
+                }
+                throw std::runtime_error("recvfrom failed");
             }
 
             try {
@@ -106,6 +121,7 @@ int main() {
                 if (resp.at("type") != "ANNOUNCE") {
                     continue;
                 }
+                found_response = true;
                 char ip[INET_ADDRSTRLEN] = {0};
                 inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
 
@@ -119,6 +135,10 @@ int main() {
             } catch (const std::exception& ex) {
                 std::cerr << "[pc] bad response: " << ex.what() << std::endl;
             }
+        }
+
+        if (!found_response) {
+            std::cout << "[pc] no response" << std::endl;
         }
 
         close(sock);
