@@ -82,8 +82,13 @@ int main() {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kTimeoutSec);
         bool found_response = false;
 
-        while (std::chrono::steady_clock::now() < deadline) {
-            const auto remaining = deadline - std::chrono::steady_clock::now();
+        while (true) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                break;
+            }
+
+            const auto remaining = deadline - now;
             timeval tv{};
             tv.tv_sec = static_cast<time_t>(std::chrono::duration_cast<std::chrono::seconds>(remaining).count());
             tv.tv_usec = static_cast<suseconds_t>(
