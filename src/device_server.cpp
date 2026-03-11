@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -14,6 +15,7 @@ namespace {
 constexpr int kDiscoveryPort = 37020;
 constexpr size_t kMaxPacket = 2048;
 constexpr uint64_t kSkewSeconds = 10;
+constexpr const char* kMdnsMulticastIp = "224.0.0.251";
 
 void ensure(bool condition, const char* msg) {
     if (!condition) {
@@ -43,7 +45,21 @@ int main() {
 
         ensure(bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0, "bind failed");
 
-        std::cout << "[device] listening UDP on port " << kDiscoveryPort << std::endl;
+        ip_mreq mreq{};
+        mreq.imr_multiaddr.s_addr = inet_addr(kMdnsMulticastIp);
+        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+        const bool mdns_joined =
+            setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == 0;
+        if (!mdns_joined) {
+            std::cerr << "[device] warning: unable to join mDNS multicast " << kMdnsMulticastIp
+                      << " (" << std::strerror(errno)
+                      << "), continuing with broadcast/loopback discovery" << std::endl;
+        }
+
+        std::cout << "[device] listening UDP on port " << kDiscoveryPort
+                  << " (broadcast"
+                  << (mdns_joined ? " + mDNS multicast " : " only; mDNS unavailable")
+                  << (mdns_joined ? kMdnsMulticastIp : "") << ")" << std::endl;
 
         while (true) {
             sockaddr_in client_addr{};

@@ -18,6 +18,7 @@ namespace {
 constexpr int kDiscoveryPort = 37020;
 constexpr int kTimeoutSec = 2;
 constexpr size_t kMaxPacket = 2048;
+constexpr const char* kMdnsMulticastIp = "224.0.0.251";
 
 void ensure(bool condition, const char* msg) {
     if (!condition) {
@@ -74,8 +75,15 @@ int main() {
         const ssize_t local_sent = sendto(sock, packet.data(), packet.size(), 0,
                                           reinterpret_cast<sockaddr*>(&loopback), sizeof(loopback));
 
-        ensure(bcast_sent >= 0 || local_sent >= 0,
-               "sendto failed for both broadcast and loopback");
+        sockaddr_in mdns_multicast{};
+        mdns_multicast.sin_family = AF_INET;
+        mdns_multicast.sin_port = htons(kDiscoveryPort);
+        mdns_multicast.sin_addr.s_addr = inet_addr(kMdnsMulticastIp);
+        const ssize_t mdns_sent = sendto(sock, packet.data(), packet.size(), 0,
+                                         reinterpret_cast<sockaddr*>(&mdns_multicast), sizeof(mdns_multicast));
+
+        ensure(bcast_sent >= 0 || local_sent >= 0 || mdns_sent >= 0,
+               "sendto failed for broadcast, loopback, and mDNS multicast");
 
         std::cout << "[pc] DISCOVER sent, waiting " << kTimeoutSec << "s..." << std::endl;
 
