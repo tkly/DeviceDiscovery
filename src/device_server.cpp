@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -47,11 +48,18 @@ int main() {
         ip_mreq mreq{};
         mreq.imr_multiaddr.s_addr = inet_addr(kMdnsMulticastIp);
         mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-        ensure(setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == 0,
-               "setsockopt IP_ADD_MEMBERSHIP failed");
+        const bool mdns_joined =
+            setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == 0;
+        if (!mdns_joined) {
+            std::cerr << "[device] warning: unable to join mDNS multicast " << kMdnsMulticastIp
+                      << " (" << std::strerror(errno)
+                      << "), continuing with broadcast/loopback discovery" << std::endl;
+        }
 
         std::cout << "[device] listening UDP on port " << kDiscoveryPort
-                  << " (broadcast + mDNS multicast " << kMdnsMulticastIp << ")" << std::endl;
+                  << " (broadcast"
+                  << (mdns_joined ? " + mDNS multicast " : " only; mDNS unavailable")
+                  << (mdns_joined ? kMdnsMulticastIp : "") << ")" << std::endl;
 
         while (true) {
             sockaddr_in client_addr{};
