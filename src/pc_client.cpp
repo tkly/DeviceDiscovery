@@ -18,6 +18,7 @@ namespace {
 constexpr int kDiscoveryPort = 37020;
 constexpr int kTimeoutSec = 2;
 constexpr size_t kMaxPacket = 2048;
+constexpr const char* kMdnsMulticastIp = "224.0.0.251";
 
 void ensure(bool condition, const char* msg) {
     if (!condition) {
@@ -74,16 +75,28 @@ int main() {
         const ssize_t local_sent = sendto(sock, packet.data(), packet.size(), 0,
                                           reinterpret_cast<sockaddr*>(&loopback), sizeof(loopback));
 
-        ensure(bcast_sent >= 0 || local_sent >= 0,
-               "sendto failed for both broadcast and loopback");
+        sockaddr_in mdns_multicast{};
+        mdns_multicast.sin_family = AF_INET;
+        mdns_multicast.sin_port = htons(kDiscoveryPort);
+        mdns_multicast.sin_addr.s_addr = inet_addr(kMdnsMulticastIp);
+        const ssize_t mdns_sent = sendto(sock, packet.data(), packet.size(), 0,
+                                         reinterpret_cast<sockaddr*>(&mdns_multicast), sizeof(mdns_multicast));
+
+        ensure(bcast_sent >= 0 || local_sent >= 0 || mdns_sent >= 0,
+               "sendto failed for broadcast, loopback, and mDNS multicast");
 
         std::cout << "[pc] DISCOVER sent, waiting " << kTimeoutSec << "s..." << std::endl;
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kTimeoutSec);
         bool found_response = false;
 
-        while (std::chrono::steady_clock::now() < deadline) {
-            const auto remaining = deadline - std::chrono::steady_clock::now();
+        while (true) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline) {
+                break;
+            }
+
+            const auto remaining = deadline - now;
             timeval tv{};
             tv.tv_sec = static_cast<time_t>(std::chrono::duration_cast<std::chrono::seconds>(remaining).count());
             tv.tv_usec = static_cast<suseconds_t>(

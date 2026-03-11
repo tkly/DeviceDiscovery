@@ -14,6 +14,7 @@ namespace {
 constexpr int kDiscoveryPort = 37020;
 constexpr size_t kMaxPacket = 2048;
 constexpr uint64_t kSkewSeconds = 10;
+constexpr const char* kMdnsMulticastIp = "224.0.0.251";
 
 void ensure(bool condition, const char* msg) {
     if (!condition) {
@@ -43,7 +44,14 @@ int main() {
 
         ensure(bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0, "bind failed");
 
-        std::cout << "[device] listening UDP on port " << kDiscoveryPort << std::endl;
+        ip_mreq mreq{};
+        mreq.imr_multiaddr.s_addr = inet_addr(kMdnsMulticastIp);
+        mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+        ensure(setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) == 0,
+               "setsockopt IP_ADD_MEMBERSHIP failed");
+
+        std::cout << "[device] listening UDP on port " << kDiscoveryPort
+                  << " (broadcast + mDNS multicast " << kMdnsMulticastIp << ")" << std::endl;
 
         while (true) {
             sockaddr_in client_addr{};
